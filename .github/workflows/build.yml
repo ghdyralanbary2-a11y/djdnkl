@@ -1,0 +1,661 @@
+name: Build Keyboard APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate project files
+        run: |
+          mkdir -p "$(dirname 'settings.gradle')"
+          cat > 'settings.gradle' <<'ABK_EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+              plugins {
+                  id 'com.android.application' version '8.2.2'
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "ABKKeyboard"
+          include ':app'
+          ABK_EOF
+          mkdir -p "$(dirname 'app/build.gradle')"
+          cat > 'app/build.gradle' <<'ABK_EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.abk.keyboard'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.abk.keyboard"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+          }
+          ABK_EOF
+          mkdir -p "$(dirname 'app/src/main/AndroidManifest.xml')"
+          cat > 'app/src/main/AndroidManifest.xml' <<'ABK_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <application
+                  android:allowBackup="true"
+                  android:label="ABK Keyboard"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".KeyboardService"
+                      android:exported="true"
+                      android:label="ABK Keyboard"
+                      android:permission="android.permission.BIND_INPUT_METHOD">
+                      <intent-filter>
+                          <action android:name="android.view.InputMethod" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.view.im"
+                          android:resource="@xml/method" />
+                  </service>
+
+              </application>
+          </manifest>
+          ABK_EOF
+          mkdir -p "$(dirname 'app/src/main/res/xml/method.xml')"
+          cat > 'app/src/main/res/xml/method.xml' <<'ABK_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <input-method xmlns:android="http://schemas.android.com/apk/res/android"
+              android:settingsActivity="com.abk.keyboard.MainActivity" />
+          ABK_EOF
+          mkdir -p "$(dirname 'app/src/main/java/com/abk/keyboard/MainActivity.java')"
+          cat > 'app/src/main/java/com/abk/keyboard/MainActivity.java' <<'ABK_EOF'
+          package com.abk.keyboard;
+
+          import android.app.Activity;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.text.InputType;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.inputmethod.InputMethodManager;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.Switch;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          public class MainActivity extends Activity {
+
+              private int dp(int v) {
+                  return Math.round(v * getResources().getDisplayMetrics().density);
+              }
+
+              private TextView label(String text, int sp, boolean bold) {
+                  TextView t = new TextView(this);
+                  t.setText(text);
+                  t.setTextSize(sp);
+                  t.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                  if (bold) t.setTypeface(t.getTypeface(), android.graphics.Typeface.BOLD);
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                  lp.topMargin = dp(14);
+                  t.setLayoutParams(lp);
+                  return t;
+              }
+
+              private int parse(EditText e, int def) {
+                  try {
+                      return Integer.parseInt(e.getText().toString().trim());
+                  } catch (Exception ex) {
+                      return def;
+                  }
+              }
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  final SharedPreferences p = getSharedPreferences("kb", MODE_PRIVATE);
+
+                  ScrollView sv = new ScrollView(this);
+                  sv.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                  sv.setFillViewport(true);
+
+                  LinearLayout l = new LinearLayout(this);
+                  l.setOrientation(LinearLayout.VERTICAL);
+                  l.setPadding(dp(16), dp(16), dp(16), dp(24));
+                  sv.addView(l);
+
+                  l.addView(label("ليفاي القديس", 26, true));
+                  l.addView(label("1) فعّل الكيبورد  2) اختره  3) حط مفرداتك واحفظ  4) بأي تطبيق اضغط مطوّل "
+                          + "3 ثواني على رقم 1 بالكيبورد وتبدي الكتابة التلقائية. اضغط 1 مرة ثانية للإيقاف.", 15, false));
+
+                  Button b1 = new Button(this);
+                  b1.setText("1) تفعيل الكيبورد");
+                  b1.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)));
+                  l.addView(b1);
+
+                  Button b2 = new Button(this);
+                  b2.setText("2) اختيار الكيبورد");
+                  b2.setOnClickListener(v -> {
+                      InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                      if (imm != null) imm.showInputMethodPicker();
+                  });
+                  l.addView(b2);
+
+                  l.addView(label("المفردات (كل سطر مفردة أو جملة)", 18, true));
+                  final EditText words = new EditText(this);
+                  words.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+                  words.setMinLines(6);
+                  words.setGravity(Gravity.TOP | Gravity.START);
+                  words.setText(p.getString("words", ""));
+                  l.addView(words);
+
+                  l.addView(label("عدد الكلمات بكل كليشة", 18, true));
+                  final EditText count = new EditText(this);
+                  count.setInputType(InputType.TYPE_CLASS_NUMBER);
+                  count.setText(String.valueOf(p.getInt("count", 4)));
+                  l.addView(count);
+
+                  l.addView(label("سرعة الكتابة (مللي ثانية بين كل حرف، الأقل أسرع)", 18, true));
+                  final EditText speed = new EditText(this);
+                  speed.setInputType(InputType.TYPE_CLASS_NUMBER);
+                  speed.setText(String.valueOf(p.getInt("speed", 120)));
+                  l.addView(speed);
+
+                  l.addView(label("رمز بين المفردات", 18, true));
+                  final Switch sw = new Switch(this);
+                  sw.setText("تفعيل الرمز بين المفردات");
+                  sw.setChecked(p.getBoolean("sepOn", true));
+                  l.addView(sw);
+
+                  final EditText sep = new EditText(this);
+                  sep.setInputType(InputType.TYPE_CLASS_TEXT);
+                  sep.setText(p.getString("sep", "~+~"));
+                  l.addView(sep);
+
+                  Button save = new Button(this);
+                  save.setText("حفظ");
+                  save.setOnClickListener(v -> {
+                      p.edit()
+                              .putString("words", words.getText().toString())
+                              .putInt("count", Math.max(1, parse(count, 4)))
+                              .putInt("speed", Math.max(20, parse(speed, 120)))
+                              .putBoolean("sepOn", sw.isChecked())
+                              .putString("sep", sep.getText().toString())
+                              .apply();
+                      Toast.makeText(this, "تم الحفظ", Toast.LENGTH_SHORT).show();
+                  });
+                  l.addView(save);
+
+                  setContentView(sv);
+              }
+          }
+          ABK_EOF
+          mkdir -p "$(dirname 'app/src/main/java/com/abk/keyboard/KeyboardService.java')"
+          cat > 'app/src/main/java/com/abk/keyboard/KeyboardService.java' <<'ABK_EOF'
+          package com.abk.keyboard;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.graphics.drawable.GradientDrawable;
+          import android.inputmethodservice.InputMethodService;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.view.Gravity;
+          import android.view.KeyEvent;
+          import android.view.MotionEvent;
+          import android.view.View;
+          import android.view.inputmethod.EditorInfo;
+          import android.view.inputmethod.InputConnection;
+          import android.view.inputmethod.InputMethodManager;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          import java.util.ArrayList;
+          import java.util.HashMap;
+          import java.util.List;
+          import java.util.Random;
+
+          public class KeyboardService extends InputMethodService {
+
+              private static final String[] NUMS = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"};
+              private static final String[][] LETTERS = {
+                      {"ض", "ص", "ث", "ق", "ف", "غ", "ع", "ه", "خ", "ح", "ج"},
+                      {"ش", "س", "ي", "ب", "ل", "ا", "ت", "ن", "م", "ك", "ط"},
+                      {"ذ", "ء", "ؤ", "ر", "ى", "ة", "و", "ز", "ظ", "د"}
+              };
+
+              private static final int BG = 0xFF1F1F1F;
+              private static final int KEY = 0xFF3C3C3C;
+              private static final int KEY_FN = 0xFF2B2B2B;
+              private static final int KEY_DOWN = 0xFF7A7A7A;
+              private static final int KEY_ACTIVE = 0xFF1A73E8;
+
+              private final Handler handler = new Handler(Looper.getMainLooper());
+              private final Random random = new Random();
+              private final HashMap<String, TextView> keyMap = new HashMap<>();
+
+              private FrameLayout root;
+              private TextView bubble;
+              private TextView key1;
+              private TextView flashed;
+
+              private boolean running = false;
+              private boolean longFired = false;
+              private String pending = "";
+              private int pos = 0;
+              private int speed = 120;
+              private int count = 4;
+              private boolean sepOn = true;
+              private String sep = "~+~";
+
+              private int dp(int v) {
+                  return Math.round(v * getResources().getDisplayMetrics().density);
+              }
+
+              private GradientDrawable bg(int color) {
+                  GradientDrawable gd = new GradientDrawable();
+                  gd.setColor(color);
+                  gd.setCornerRadius(dp(8));
+                  return gd;
+              }
+
+              // ---------------------------------------------------------------- view
+
+              @Override
+              public View onCreateInputView() {
+                  keyMap.clear();
+                  root = new FrameLayout(this);
+                  root.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
+                  root.setBackgroundColor(BG);
+
+                  LinearLayout col = new LinearLayout(this);
+                  col.setOrientation(LinearLayout.VERTICAL);
+                  col.setPadding(dp(3), dp(4), dp(3), dp(6));
+                  FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+                  cp.topMargin = dp(44);
+                  root.addView(col, cp);
+
+                  col.addView(letterRow(NUMS, false));
+                  for (int i = 0; i < LETTERS.length; i++) {
+                      col.addView(letterRow(LETTERS[i], i == 2));
+                  }
+                  col.addView(bottomRow());
+
+                  bubble = new TextView(this);
+                  bubble.setTextColor(Color.WHITE);
+                  bubble.setTextSize(28);
+                  bubble.setGravity(Gravity.CENTER);
+                  bubble.setBackground(bg(0xFF5A5A5A));
+                  bubble.setVisibility(View.GONE);
+                  root.addView(bubble, new FrameLayout.LayoutParams(dp(52), dp(60)));
+
+                  return root;
+              }
+
+              private LinearLayout newRow() {
+                  LinearLayout r = new LinearLayout(this);
+                  r.setOrientation(LinearLayout.HORIZONTAL);
+                  r.setLayoutParams(new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+                  return r;
+              }
+
+              private TextView newKey(String text, float weight, int color, int sp) {
+                  TextView tv = new TextView(this);
+                  tv.setText(text);
+                  tv.setTextColor(Color.WHITE);
+                  tv.setTextSize(sp);
+                  tv.setGravity(Gravity.CENTER);
+                  tv.setBackground(bg(color));
+                  tv.setTag(color);
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(50), weight);
+                  lp.setMargins(dp(3), dp(4), dp(3), dp(4));
+                  tv.setLayoutParams(lp);
+                  return tv;
+              }
+
+              private LinearLayout letterRow(String[] labels, boolean withDelete) {
+                  LinearLayout row = newRow();
+                  for (final String s : labels) {
+                      TextView k = newKey(s, 1f, KEY, 20);
+                      keyMap.put(s, k);
+                      if (s.equals("1")) key1 = k;
+                      attach(k, s, true, false, () -> typeText(s));
+                      row.addView(k);
+                  }
+                  if (withDelete) {
+                      TextView d = newKey("⌫", 1.5f, KEY_FN, 20);
+                      attach(d, "⌫", false, true, this::doDelete);
+                      row.addView(d);
+                  }
+                  return row;
+              }
+
+              private LinearLayout bottomRow() {
+                  LinearLayout row = newRow();
+
+                  TextView globe = newKey("🌐", 1.2f, KEY_FN, 18);
+                  attach(globe, "", false, false, () -> {
+                      InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                      if (imm != null) imm.showInputMethodPicker();
+                  });
+                  row.addView(globe);
+
+                  TextView comma = newKey("،", 1f, KEY_FN, 20);
+                  keyMap.put("،", comma);
+                  attach(comma, "،", true, false, () -> typeText("،"));
+                  row.addView(comma);
+
+                  TextView space = newKey("العربية", 5f, KEY, 14);
+                  keyMap.put(" ", space);
+                  attach(space, " ", false, false, () -> typeText(" "));
+                  row.addView(space);
+
+                  TextView dot = newKey(".", 1f, KEY_FN, 20);
+                  keyMap.put(".", dot);
+                  attach(dot, ".", true, false, () -> typeText("."));
+                  row.addView(dot);
+
+                  TextView enter = newKey("↵", 1.5f, KEY_FN, 20);
+                  attach(enter, "", false, false, this::doEnter);
+                  row.addView(enter);
+
+                  return row;
+              }
+
+              // --------------------------------------------------------------- touch
+
+              private final Runnable longRun = () -> {
+                  longFired = true;
+                  if (!running) startAuto();
+              };
+
+              private Runnable deleteRepeat;
+
+              private void attach(final TextView tv, final String label, final boolean bubbleOn,
+                                  final boolean repeat, final Runnable action) {
+                  final boolean isOne = label.equals("1");
+                  tv.setOnTouchListener((v, e) -> {
+                      switch (e.getActionMasked()) {
+                          case MotionEvent.ACTION_DOWN:
+                              press(tv, true);
+                              if (bubbleOn) showBubble(tv, label);
+                              longFired = false;
+                              if (isOne) handler.postDelayed(longRun, 3000);
+                              if (repeat) {
+                                  action.run();
+                                  deleteRepeat = new Runnable() {
+                                      @Override
+                                      public void run() {
+                                          action.run();
+                                          handler.postDelayed(this, 50);
+                                      }
+                                  };
+                                  handler.postDelayed(deleteRepeat, 400);
+                              }
+                              return true;
+                          case MotionEvent.ACTION_UP:
+                              press(tv, false);
+                              hideBubble();
+                              if (isOne) handler.removeCallbacks(longRun);
+                              if (repeat) {
+                                  if (deleteRepeat != null) handler.removeCallbacks(deleteRepeat);
+                                  return true;
+                              }
+                              if (isOne) {
+                                  if (longFired) {
+                                      longFired = false;
+                                  } else if (running) {
+                                      stopAuto();
+                                  } else {
+                                      action.run();
+                                  }
+                                  return true;
+                              }
+                              action.run();
+                              return true;
+                          case MotionEvent.ACTION_CANCEL:
+                              press(tv, false);
+                              hideBubble();
+                              if (isOne) handler.removeCallbacks(longRun);
+                              if (deleteRepeat != null) handler.removeCallbacks(deleteRepeat);
+                              return true;
+                      }
+                      return true;
+                  });
+              }
+
+              private void press(TextView tv, boolean down) {
+                  int base = (Integer) tv.getTag();
+                  tv.setBackground(bg(down ? KEY_DOWN : base));
+              }
+
+              private void showBubble(View key, String label) {
+                  if (bubble == null || root == null) return;
+                  bubble.setText(label);
+                  int[] k = new int[2];
+                  int[] r = new int[2];
+                  key.getLocationInWindow(k);
+                  root.getLocationInWindow(r);
+                  int bw = bubble.getLayoutParams().width;
+                  int bh = bubble.getLayoutParams().height;
+                  float x = k[0] - r[0] + key.getWidth() / 2f - bw / 2f;
+                  x = Math.max(0, Math.min(x, root.getWidth() - bw));
+                  float y = Math.max(0, k[1] - r[1] - bh + dp(6));
+                  bubble.setX(x);
+                  bubble.setY(y);
+                  bubble.setVisibility(View.VISIBLE);
+              }
+
+              private void hideBubble() {
+                  if (bubble != null) bubble.setVisibility(View.GONE);
+              }
+
+              // ------------------------------------------------------------- typing
+
+              private void typeText(String s) {
+                  InputConnection ic = getCurrentInputConnection();
+                  if (ic != null) ic.commitText(s, 1);
+              }
+
+              private void doDelete() {
+                  sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL);
+              }
+
+              private void doEnter() {
+                  InputConnection ic = getCurrentInputConnection();
+                  if (ic == null) return;
+                  EditorInfo ei = getCurrentInputEditorInfo();
+                  int action = ei == null ? 0 : (ei.imeOptions & EditorInfo.IME_MASK_ACTION);
+                  boolean noEnter = ei != null && (ei.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0;
+                  if (!noEnter && action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
+                      ic.performEditorAction(action);
+                  } else {
+                      sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER);
+                  }
+              }
+
+              // --------------------------------------------------------- auto typing
+
+              private void startAuto() {
+                  SharedPreferences p = getSharedPreferences("kb", MODE_PRIVATE);
+                  speed = Math.max(20, p.getInt("speed", 120));
+                  count = Math.max(1, p.getInt("count", 4));
+                  sepOn = p.getBoolean("sepOn", true);
+                  sep = p.getString("sep", "~+~");
+                  pending = "";
+                  pos = 0;
+                  running = true;
+                  setKey1Active(true);
+                  handler.post(step);
+              }
+
+              private void stopAuto() {
+                  running = false;
+                  handler.removeCallbacks(step);
+                  handler.removeCallbacks(unflash);
+                  unflash.run();
+                  setKey1Active(false);
+              }
+
+              private void setKey1Active(boolean active) {
+                  if (key1 == null) return;
+                  int c = active ? KEY_ACTIVE : KEY;
+                  key1.setTag(c);
+                  key1.setBackground(bg(c));
+              }
+
+              private String buildCliche() {
+                  SharedPreferences p = getSharedPreferences("kb", MODE_PRIVATE);
+                  List<String> w = new ArrayList<>();
+                  for (String line : p.getString("words", "").split("\n")) {
+                      line = line.trim();
+                      if (!line.isEmpty()) w.add(line);
+                  }
+                  if (w.isEmpty()) return "افتح التطبيق وحط مفرداتك";
+                  String joiner = (sepOn && !sep.isEmpty()) ? sep : " ";
+                  StringBuilder sb = new StringBuilder();
+                  for (int i = 0; i < count; i++) {
+                      if (i > 0) sb.append(joiner);
+                      sb.append(w.get(random.nextInt(w.size())));
+                  }
+                  return sb.toString();
+              }
+
+              private final Runnable step = new Runnable() {
+                  @Override
+                  public void run() {
+                      if (!running) return;
+                      InputConnection ic = getCurrentInputConnection();
+                      if (ic == null) {
+                          stopAuto();
+                          return;
+                      }
+                      if (pos >= pending.length()) {
+                          pending = buildCliche() + " ";
+                          pos = 0;
+                      }
+                      int cp = pending.codePointAt(pos);
+                      String s = new String(Character.toChars(cp));
+                      pos += s.length();
+                      ic.commitText(s, 1);
+
+                      int d = (int) (speed * (0.7 + random.nextDouble() * 0.6));
+                      flash(s, d);
+                      handler.postDelayed(this, d);
+                  }
+              };
+
+              private final Runnable unflash = () -> {
+                  if (flashed != null) {
+                      press(flashed, false);
+                      flashed = null;
+                  }
+                  hideBubble();
+              };
+
+              private String normalize(String s) {
+                  switch (s) {
+                      case "أ":
+                      case "إ":
+                      case "آ":
+                      case "ٱ":
+                          return "ا";
+                      case "ئ":
+                          return "ء";
+                      case ",":
+                          return "،";
+                  }
+                  char c = s.charAt(0);
+                  if (c >= '٠' && c <= '٩') return String.valueOf((char) ('0' + (c - '٠')));
+                  return s;
+              }
+
+              private void flash(String s, int delay) {
+                  TextView k = keyMap.get(normalize(s));
+                  handler.removeCallbacks(unflash);
+                  unflash.run();
+                  if (k == null) return;
+                  flashed = k;
+                  press(k, true);
+                  if (!s.equals(" ")) showBubble(k, normalize(s));
+                  handler.postDelayed(unflash, Math.max(25, (int) (delay * 0.6)));
+              }
+
+              // ----------------------------------------------------------- lifecycle
+
+              @Override
+              public void onFinishInputView(boolean finishingInput) {
+                  stopAuto();
+                  super.onFinishInputView(finishingInput);
+              }
+
+              @Override
+              public void onDestroy() {
+                  stopAuto();
+                  super.onDestroy();
+              }
+          }
+          ABK_EOF
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.5
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keyboard-apk
+          path: app/build/outputs/apk/debug/*.apk
